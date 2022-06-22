@@ -16,13 +16,18 @@
  */
 package com.tencent.tsf.femas.registry.impl.polaris.serviceregistry;
 
+import com.google.common.collect.Lists;
+import com.tencent.polaris.api.config.Configuration;
 import com.tencent.polaris.api.core.ProviderAPI;
 import com.tencent.polaris.api.exception.ErrorCode;
 import com.tencent.polaris.api.exception.PolarisException;
 import com.tencent.polaris.api.rpc.InstanceDeregisterRequest;
 import com.tencent.polaris.api.rpc.InstanceRegisterRequest;
 import com.tencent.polaris.api.rpc.InstanceRegisterResponse;
+import com.tencent.polaris.factory.ConfigAPIFactory;
 import com.tencent.polaris.factory.api.DiscoveryAPIFactory;
+import com.tencent.polaris.factory.config.global.ServerConnectorConfigImpl;
+import com.tencent.tsf.femas.common.RegistryConstants;
 import com.tencent.tsf.femas.common.entity.EndpointStatus;
 import com.tencent.tsf.femas.common.entity.Service;
 import com.tencent.tsf.femas.common.entity.ServiceInstance;
@@ -43,7 +48,10 @@ public class PolarisServiceRegistry extends AbstractServiceRegistry {
     private final PolarisBeatReactor polarisBeatReactor;
 
     public PolarisServiceRegistry(Map<String, String> configMap) {
-        providerApi = DiscoveryAPIFactory.createProviderAPI();
+        Configuration configuration = ConfigAPIFactory.defaultConfig();
+        ServerConnectorConfigImpl serverConnector = (ServerConnectorConfigImpl) configuration.getGlobal().getServerConnector();
+        serverConnector.setAddresses(Lists.newArrayList(configMap.get(RegistryConstants.REGISTRY_HOST) + ":" + configMap.get(RegistryConstants.REGISTRY_PORT)));
+        providerApi = DiscoveryAPIFactory.createProviderAPIByConfig(configuration);
         polarisBeatReactor = new PolarisBeatReactor(providerApi);
     }
 
@@ -52,7 +60,7 @@ public class PolarisServiceRegistry extends AbstractServiceRegistry {
      */
     @Override
     protected void doRegister(ServiceInstance serviceInstance) {
-        logger.info("Registering service with polaris: " + serviceInstance);
+        logger.info("Registering service with polaris: {}", serviceInstance);
         try {
             // 执行服务注册
             InstanceRegisterRequest request = new InstanceRegisterRequest();
@@ -76,9 +84,9 @@ public class PolarisServiceRegistry extends AbstractServiceRegistry {
                 // 建立一个上报信息,给后面使用
                 instanceInfo = new InstanceInfo(null, namespace, serviceName, port, host, ttl);
             }
-            logger.info("Service register to polaris request:" + request);
+            logger.info("Service register to polaris request: {}", request);
             InstanceRegisterResponse instanceRegisterResponse = providerApi.register(request);
-            logger.info("Service register to polaris instanceRegisterResponse:" + instanceRegisterResponse);
+            logger.info("Service register to polaris instanceRegisterResponse: {}", instanceRegisterResponse);
             if (null != instanceInfo) {
                 instanceInfo.setInstanceId(serviceInstance.getId());
                 polarisBeatReactor.addInstance(serviceInstance.getId(), instanceInfo);
@@ -86,7 +94,7 @@ public class PolarisServiceRegistry extends AbstractServiceRegistry {
         } catch (Exception e) {
             logger.error("Error registering service with polaris: " + serviceInstance, e);
         }
-        logger.info("Service " + serviceInstance + " registered.");
+        logger.info("Service {} registered.", serviceInstance);
     }
 
     /**
@@ -94,7 +102,7 @@ public class PolarisServiceRegistry extends AbstractServiceRegistry {
      */
     @Override
     protected void doDeregister(ServiceInstance serviceInstance) {
-        logger.info("Deregistering service with polaris: " + serviceInstance);
+        logger.info("Deregistering service with polaris: {}", serviceInstance);
         try {
             // 停止心跳
             polarisBeatReactor.removeInstance(serviceInstance.getId());
@@ -105,7 +113,7 @@ public class PolarisServiceRegistry extends AbstractServiceRegistry {
             request.setService(service.getName());
             request.setHost(serviceInstance.getHost());
             request.setPort(serviceInstance.getPort());
-            logger.info("Service deregister to polaris request:" + request);
+            logger.info("Service deregister to polaris request: {}", request);
             providerApi.deRegister(request);
         } catch (PolarisException e) {
             // 反注册后,如果心跳发送已经被载入schedule,会发生错误
@@ -113,9 +121,9 @@ public class PolarisServiceRegistry extends AbstractServiceRegistry {
                 logger.warn("Last heartbeats still in schedule,please ignore this error:{}", serviceInstance, e);
             }
         } catch (Exception e) {
-            logger.error("Error deregisterInstance service with polaris:{} ", serviceInstance.toString(), e);
+            logger.error("Error deregisterInstance service with polaris:{} ", serviceInstance, e);
         }
-        logger.info("Deregister service with polaris: " + serviceInstance.toString() + " success.");
+        logger.info("Deregister service with polaris: {} success.", serviceInstance);
     }
 
     /**
@@ -123,6 +131,7 @@ public class PolarisServiceRegistry extends AbstractServiceRegistry {
      */
     @Override
     public void setStatus(ServiceInstance serviceInstance, EndpointStatus status) {
+        // TODO?
     }
 
     /**

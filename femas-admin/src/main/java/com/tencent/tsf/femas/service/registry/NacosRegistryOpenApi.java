@@ -17,11 +17,13 @@
 
 package com.tencent.tsf.femas.service.registry;
 
+import com.tencent.tsf.femas.common.constant.FemasConstant;
 import com.tencent.tsf.femas.common.entity.EndpointStatus;
 import com.tencent.tsf.femas.common.entity.Service;
 import com.tencent.tsf.femas.common.entity.ServiceInstance;
 import com.tencent.tsf.femas.common.serialize.JSONSerializer;
 import com.tencent.tsf.femas.common.util.HttpResult;
+import com.tencent.tsf.femas.common.util.StringUtils;
 import com.tencent.tsf.femas.entity.namespace.Namespace;
 import com.tencent.tsf.femas.entity.param.RegistryInstanceParam;
 import com.tencent.tsf.femas.entity.registry.ClusterServer;
@@ -31,12 +33,9 @@ import com.tencent.tsf.femas.entity.registry.ServiceBriefInfo;
 import com.tencent.tsf.femas.entity.registry.nacos.NacosInstance;
 import com.tencent.tsf.femas.entity.registry.nacos.NacosServer;
 import com.tencent.tsf.femas.entity.registry.nacos.NacosService;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+
+import java.util.*;
+
 import org.apache.commons.lang3.math.NumberUtils;
 import org.apache.http.HttpStatus;
 import org.springframework.stereotype.Component;
@@ -175,7 +174,14 @@ public class NacosRegistryOpenApi extends RegistryOpenApiAdaptor {
                     instance.setAllMetadata(i.getMetadata());
                     instance.setHost(i.getIp());
                     instance.setPort(NumberUtils.toInt(i.getPort()));
-                    instance.setId(i.getInstanceId());
+                    String nacosInstanceId = i.getInstanceId();
+                    //某些版本的nacos返回的字段不包含InstanceId，使用femas的InstanceId兜底
+                    if(StringUtils.isNotBlank(nacosInstanceId)){
+                        instance.setId(nacosInstanceId);
+                    }else{
+                        String femasInstanceId = i.getMetadata().get(FemasConstant.FEMAS_META_INSTANCE_ID_KEY);
+                        instance.setId(femasInstanceId);
+                    }
                     instance.setStatus(i.isEnabled() && i.isHealthy() ? EndpointStatus.UP : EndpointStatus.DOWN);
                     instance.setLastUpdateTime(i.getLastBeat());
                     instance.setService(new Service(i.getClusterName(), i.getServiceName()));
@@ -211,6 +217,22 @@ public class NacosRegistryOpenApi extends RegistryOpenApiAdaptor {
     }
 
     @Override
+    public boolean modifyNamespace(RegistryConfig config, Namespace namespace) {
+        String url = selectOne(config);
+        try {
+            Map<String, Object> queryMap = new HashMap<>();
+            queryMap.put("namespace", namespace.getNamespaceId());
+            queryMap.put("namespaceShowName", namespace.getName());
+            queryMap.put("namespaceDesc", namespace.getDesc());
+            HttpResult<String> result = httpClient.put(url.concat(NAMESPCE_URL), null, queryMap);
+            return Boolean.TRUE.toString().equals(result.getData());
+        } catch (Exception e) {
+            e.printStackTrace();
+            return false;
+        }
+    }
+
+    @Override
     public boolean deleteNamespace(RegistryConfig config, Namespace namespace) {
         String url = selectOne(config);
         try {
@@ -223,4 +245,26 @@ public class NacosRegistryOpenApi extends RegistryOpenApiAdaptor {
             return false;
         }
     }
+
+    @Override
+    public List<Namespace> allNamespaces(RegistryConfig config){
+        List namespaceList = new ArrayList();
+        String url = selectOne(config);
+        try {
+            HttpResult<String> result = httpClient.get(url.concat(NAMESPCE_URL), null, null);
+            Map map = JSONSerializer.deserializeStr(Map.class, result.getData());
+            List<Map> namespaceMapList =(List) map.get("data");
+            for(Map nsp:namespaceMapList){
+                Namespace namespace =new Namespace();
+                namespace.setNamespaceId((String) nsp.get("namespace"));
+                namespace.setName((String) nsp.get("namespaceShowName"));
+                namespace.setRegistryId(Arrays.asList(config.getRegistryId()));
+                namespaceList.add(namespace);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return namespaceList;
+    }
+
 }

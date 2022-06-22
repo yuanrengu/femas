@@ -1,5 +1,6 @@
 package com.tencent.tsf.femas.registry.impl.etcd.discovery;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tencent.tsf.femas.common.RegistryConstants;
@@ -21,8 +22,10 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -50,7 +53,9 @@ public class EtcdServiceDiscoveryClient extends AbstractServiceDiscoveryClient {
     protected final ServerUpdater serverListUpdater;
 
     public EtcdServiceDiscoveryClient(Map<String, String> configMap) {
-        Client client = Client.builder().endpoints(configMap.get(RegistryConstants.REGISTRY_HOST)).build();
+        String host = Objects.requireNonNull(configMap.get(RegistryConstants.REGISTRY_HOST));
+        String port = Objects.requireNonNull(configMap.get(RegistryConstants.REGISTRY_PORT));
+        Client client = Client.builder().endpoints(host + ":" + port).build();
         this.kvClient = client.getKVClient();
         this.objectMapper = new ObjectMapper();
         objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
@@ -88,6 +93,26 @@ public class EtcdServiceDiscoveryClient extends AbstractServiceDiscoveryClient {
         return instancesList;
     }
 
+    @Override
+    public List<String> getAllServices() {
+        CompletableFuture<GetResponse> future = kvClient.get(ByteSequence.EMPTY);
+        List<String> services = new ArrayList<>();
+
+        try {
+            List<KeyValue> keyValues = future.get().getKvs();
+
+            for (KeyValue keyValue : keyValues) {
+                ServiceInstance serviceInstance = objectMapper.readValue(keyValue.getValue().toString(), ServiceInstance.class);
+                services.add(serviceInstance.getService().getName());
+            }
+
+        } catch (InterruptedException | ExecutionException | JsonProcessingException e) {
+            logger.error("Error with getAllServices: {0}", e);
+        }
+
+        return services;
+    }
+
     private class Notifier {
         private final Service service;
         private ScheduledFuture<?> scheduledFuture;
@@ -109,6 +134,7 @@ public class EtcdServiceDiscoveryClient extends AbstractServiceDiscoveryClient {
             this.service = service;
         }
 
+        @Override
         public void doUpdate() {
             EtcdServiceDiscoveryClient.this.updateListOfServers(service);
         }

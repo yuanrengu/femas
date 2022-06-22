@@ -1,7 +1,10 @@
 package com.tencent.tsf.femas.registry.impl.nacos.discovery;
 
+import com.alibaba.nacos.api.common.Constants;
+import com.alibaba.nacos.api.exception.NacosException;
 import com.alibaba.nacos.api.naming.NamingService;
 import com.alibaba.nacos.api.naming.pojo.Instance;
+import com.alibaba.nacos.api.naming.pojo.ListView;
 import com.tencent.tsf.femas.common.context.Context;
 import com.tencent.tsf.femas.common.context.ContextConstant;
 import com.tencent.tsf.femas.common.context.factory.ContextFactory;
@@ -11,6 +14,7 @@ import com.tencent.tsf.femas.common.discovery.ServerUpdater;
 import com.tencent.tsf.femas.common.entity.EndpointStatus;
 import com.tencent.tsf.femas.common.entity.Service;
 import com.tencent.tsf.femas.common.entity.ServiceInstance;
+import com.tencent.tsf.femas.common.util.CollectionUtil;
 import com.tencent.tsf.femas.registry.impl.nacos.NacosRegistryBuilder;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -20,8 +24,9 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
-import static com.tencent.tsf.femas.common.RegistryConstants.*;
+import static com.tencent.tsf.femas.common.RegistryConstants.REGISTRY_HOST;
 import static com.tencent.tsf.femas.common.RegistryConstants.REGISTRY_PORT;
 import static com.tencent.tsf.femas.common.util.CommonUtils.checkNotNull;
 
@@ -33,13 +38,12 @@ import static com.tencent.tsf.femas.common.util.CommonUtils.checkNotNull;
  */
 public class NacosServiceDiscoveryClient extends AbstractServiceDiscoveryClient {
 
-    private static final  Logger LOGGER = LoggerFactory.getLogger(NacosServiceDiscoveryClient.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(NacosServiceDiscoveryClient.class);
 
     private final NamingService nacosNamingService;
 
-    private final NacosRegistryBuilder builder;
     private static volatile ContextConstant contextConstant = ContextFactory.getContextConstantInstance();
-    private static final  String default_namespace = "public";
+    private static final String DEFAULT_NAMESPACE = "public";
     protected volatile ServerUpdater serverListUpdater;
 
     private final Map<Service, List<ServiceInstance>> instances = new ConcurrentHashMap<>();
@@ -48,27 +52,28 @@ public class NacosServiceDiscoveryClient extends AbstractServiceDiscoveryClient 
 
     private final NacosServerList serverListImpl;
 
-    private Map<Service, Notifier> notifiers = new ConcurrentHashMap<>();
+    private final Map<Service, Notifier> notifiers = new ConcurrentHashMap<>();
 
     public NacosServiceDiscoveryClient(Map<String, String> configMap) {
         String host = checkNotNull(REGISTRY_HOST, configMap.get(REGISTRY_HOST));
         String portString = checkNotNull(REGISTRY_PORT, configMap.get(REGISTRY_PORT));
         Integer port = Integer.parseInt(portString);
         this.serverListUpdateInProgress = new AtomicBoolean(false);
-        this.builder = new NacosRegistryBuilder();
+        NacosRegistryBuilder builder = new NacosRegistryBuilder();
         String namespace = Context.getSystemTag(contextConstant.getNamespaceId());
-        this.nacosNamingService = builder.describeClient(() -> host.concat(":").concat(String.valueOf(port)), StringUtils.isEmpty(namespace) ? default_namespace : namespace, false, null);
+        this.nacosNamingService = builder.describeClient(() -> host.concat(":").concat(String.valueOf(port)), StringUtils.isEmpty(namespace) ? DEFAULT_NAMESPACE : namespace, false, null);
         this.serverListUpdater = new SchedulePollingServerListUpdater();
         this.serverListImpl = new NacosServerList();
     }
 
     public void updateListOfServers(Service service) {
-        List<Instance> instances = new ArrayList<>();
+        AtomicReference<List<Instance>> instanceList = new AtomicReference<>(new ArrayList<>());
         if (this.serverListImpl != null) {
-            instances = this.serverListImpl.getUpdatedListOfServers(Optional.ofNullable(service).map(s -> s.getName()).get());
-//            LOGGER.debug("List of Servers for {} obtained from Discovery client: {}", this.getIdentifier(), servers);
+            Optional.ofNullable(service)
+                    .map(Service::getName)
+                    .ifPresent(it -> instanceList.set(this.serverListImpl.getUpdatedListOfServers(it)));
         }
-        this.updateAllServerList(service, instances);
+        this.updateAllServerList(service, instanceList.get());
     }
 
     protected void updateAllServerList(Service service, List<Instance> ls) {
@@ -89,7 +94,7 @@ public class NacosServiceDiscoveryClient extends AbstractServiceDiscoveryClient 
     }
 
     List<ServiceInstance> convert(Service service, List<Instance> ls) {
-        List<ServiceInstance> instances = new ArrayList<>();
+        List<ServiceInstance> serviceInstanceList = new ArrayList<>();
         ls.forEach(i -> {
             ServiceInstance instance = new ServiceInstance();
             instance.setAllMetadata(i.getMetadata());
@@ -97,15 +102,14 @@ public class NacosServiceDiscoveryClient extends AbstractServiceDiscoveryClient 
             instance.setPort(i.getPort());
             instance.setService(service);
             instance.setStatus(i.isEnabled() && i.isHealthy() ? EndpointStatus.UP : EndpointStatus.INITIALIZING);
-            instances.add(instance);
+            serviceInstanceList.add(instance);
         });
-        return instances;
+        return serviceInstanceList;
     }
 
-    public ScheduledFuture enableAndInitLearnNewServersFeature(Service service) {
+    public ScheduledFuture<?> enableAndInitLearnNewServersFeature(Service service) {
         LOGGER.info("Using serverListUpdater {}", this.serverListUpdater.getClass().getSimpleName());
-        ScheduledFuture scheduledFuture = this.serverListUpdater.start(new Action(service));
-        return scheduledFuture;
+        return this.serverListUpdater.start(new Action(service));
     }
 
     @Override
@@ -127,10 +131,26 @@ public class NacosServiceDiscoveryClient extends AbstractServiceDiscoveryClient 
         if (instancesList != null) {
             return instancesList;
         }
-        List<Instance> instances = serverListImpl.getInitialListOfServers(service.getName());
-        instancesList = convert(service, instances);
+        List<Instance> instanceList = serverListImpl.getInitialListOfServers(service.getName());
+        instancesList = convert(service, instanceList);
         refreshServiceCache(service, instancesList);
         return instancesList;
+    }
+
+    @Override
+    public List<String> getAllServices() {
+        ListView<String> view = new ListView<>();
+        try {
+            view = nacosNamingService.getServicesOfServer(0, Integer.MAX_VALUE, Constants.DEFAULT_GROUP);
+        } catch (NacosException e) {
+            e.printStackTrace();
+        }
+
+        if (view.getData().isEmpty()){
+            return Collections.emptyList();
+        }
+
+        return view.getData();
     }
 
     class Action implements ServerUpdater.UpdateAction {
@@ -141,12 +161,15 @@ public class NacosServiceDiscoveryClient extends AbstractServiceDiscoveryClient 
             this.service = service;
         }
 
+        @Override
         public void doUpdate() {
             NacosServiceDiscoveryClient.this.updateListOfServers(service);
         }
     }
 
-    //server级别监听
+    /**
+     * server级别监听
+     */
     class NacosServerList {
         public List<Instance> getInitialListOfServers(String serviceId) {
             return getServers(serviceId);
@@ -161,9 +184,7 @@ public class NacosServiceDiscoveryClient extends AbstractServiceDiscoveryClient 
                 //默认group
 //                String group = discoveryProperties.getGroup();
                 String group = "DEFAULT_GROUP";
-                List<Instance> instances = nacosNamingService
-                        .selectInstances(serviceId, group, true);
-                return instances;
+                return nacosNamingService.selectInstances(serviceId, group, true);
             } catch (Exception e) {
                 throw new IllegalStateException(
                         "Can not get service instances from nacos, serviceId=" + serviceId,

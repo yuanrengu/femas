@@ -38,7 +38,7 @@
 ## 简介
 **Femas 是腾讯云微服务平台[TSF](https://cloud.tencent.com/product/tsf) 的开源产品形态，聚焦微服务运行时，提供给多框架统一服务发现、南北及东西流量治理、服务可观测、配置管理等一站式微服务管控能力，解决企业微服务架构转型中异构框架复用难、 激增流量管控难、排障恢复耗时长等核心问题。**
 
-> - 治理数据面：Femas运用Multi-runtime的架构设计，将微服务底层的核心能力标准化、模块化，将微服务领域割裂的基础组件通过合理的架构组装在一起，来满足多元化的微服务场景，轻量化、可移植、低成本、无云厂商绑定。
+> - 治理数据面：`Femas`运用`Multi-runtime`的架构设计，将微服务底层的核心能力标准化、模块化，将微服务领域割裂的基础组件通过合理的架构组装在一起，来满足多元化的微服务场景，轻量化、可移植、低成本、无云厂商绑定，目前社区提供`SDK`和业务无感知的`JVM TI Agent`两种`proxyLess`模式的治理数据面。
 > - 微服务控制面：Femas提供统一的控制面标准协议，一套治理协议，多语言、多数据面下发。
 
 ### 能力
@@ -63,11 +63,64 @@ Femas实现了对主流开源注册中心(目前支持`Consul、nacos、eureka`)
 ![image](https://user-images.githubusercontent.com/22976760/157235354-27819b3c-69f1-4ad1-95e0-c82d2be99272.png)
 
 - **下沉式无侵入接入，用户改造零成本**。
-	> - `Agent`字节码注入（`TODO`）
-	> - `ServiceMesh`服务网格
+	> - `Java Agent`字节码注入
+	> - `ServiceMesh`服务网格（TODO）
 - Femas希望能够将腾讯微服务产品中心对微服务的理解总结成平台，帮助用户快速搭建企业级微服务生态。
 - Femas支撑了腾讯内部亿级用户生态。
 ## 快速入门
+
+### 代码结构
+
+```
+.
+├── femas-adaptor # paas平台插件化适配层
+│   └── femas-adaptor-opensource-admin # paas平台适配层，这里默认是跟开源平台的适配，如果要对接其他控制面，可以插件化实现一个adaptor，其次在这里可以组装平台所需要的能力矩阵
+├── femas-admin # 控制台
+├── femas-admin-starter # 控制台打包部署文件
+├── femas-agent # java agent模块
+│   ├── femas-agent-core # javaagent bytebuddy封装模块
+│   ├── femas-agent-example
+│   ├── femas-agent-plugin #字节码插装插件模块
+│   ├── femas-agent-starter #premain入口
+│   └── femas-agent-tools
+├── femas-api #微服务生命周期抽象层，方便用户对接异构rpc框架
+├── femas-benchmark
+├── femas-common #工具包
+├── femas-config #配置模块插件化的抽象层
+├── femas-config-impl #配置模块的实现层
+│   ├── femas-config-consul #consul配置实现
+│   ├── femas-config-nacos #nacos配置实现层
+│   └── femas-config-paas #开源控制台的配置实现层，开源数据面和控制面的治理规则交互
+├── femas-dependencies-bom # 统一管理femas依赖版本
+├── femas-example #示例
+│   ├── feams-example-springcloud-hoxton
+│   ├── femas-example-alibaba-dubbo-consumer
+│   ├── femas-example-alibaba-dubbo-provider
+│   ├── femas-example-springcloud-2020-consumer
+│   ├── femas-example-springcloud-2020-provider
+│   ├── femas-example-springcloud-greenwich-consumer
+│   ├── femas-example-springcloud-greenwich-gateway
+│   ├── femas-example-springcloud-greenwich-provider
+│   └── femas-example-springcloud-greenwich-zuul
+├── femas-extensions #sdk对接RPC框架层
+│   ├── femas-extension-dubbo #对接dubbo
+│   └── femas-extension-springcloud #对接springcloud
+├── femas-governance #治理模块的插件化抽象层
+├── femas-governance-impl #治理模块的实现层
+├── femas-helm
+├── femas-registry #注册中心插件化抽象层
+├── femas-registry-impl #注册中心插件化的实现层
+│   ├── femas-registry-consul
+│   ├── femas-registry-etcd
+│   ├── femas-registry-eureka
+│   ├── femas-registry-k8s
+│   ├── femas-registry-nacos
+│   └── femas-registry-polaris
+├── femas-starters #用户的sdk的starter依赖
+│   ├── femas-dubbo-starters
+│   └── femas-springcloud-starters
+└── jacoco-aggregate
+```
 
 ### 安装服务端
 
@@ -278,6 +331,8 @@ circuitBreaker:
 
 ## 联系我们
 ![image](https://user-images.githubusercontent.com/22976760/153163498-07f62802-18b3-4e74-94ff-32855d542281.png)
+
+添加小Q妹微信，备注【Femas】
 
 ![image](https://user-images.githubusercontent.com/22976760/160102336-bffd2c4b-b3c7-4830-8623-92b39f102fb4.png)
 

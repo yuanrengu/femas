@@ -65,8 +65,8 @@ public class CommonExtensionLayer implements IExtensionLayer {
     private AbstractConfigHttpClientManager manager = AbstractConfigHttpClientManagerFactory
             .getConfigHttpClientManager();
 
-    private volatile Context commonContext = ContextFactory.getContextInstance();
-    private volatile ContextConstant contextConstant = ContextFactory.getContextConstantInstance();
+    private volatile static Context commonContext = ContextFactory.getContextInstance();
+    private volatile static ContextConstant contextConstant = ContextFactory.getContextConstantInstance();
     private String namespace = Context.getSystemTag(contextConstant.getNamespaceId());
 
     private volatile AbstractServiceRegistryMetadata serviceRegistryMetadata = AbstractServiceRegistryMetadataFactory
@@ -85,10 +85,7 @@ public class CommonExtensionLayer implements IExtensionLayer {
         String registryUrl = commonContext.getRegistryConfigMap().get(REGISTRY_HOST)
                 + ":" + commonContext.getRegistryConfigMap().get(REGISTRY_PORT);
         this.init(service, port, registryUrl);
-
-
     }
-
 
     public void init(Service service, Integer port, String registryUrl) {
         commonContext.init(service.getName(), port);
@@ -238,6 +235,16 @@ public class CommonExtensionLayer implements IExtensionLayer {
     }
 
     @Override
+    public List<ServiceInstance> getInstance(String serviceName, String namespace) {
+        return serviceDiscoveryClient.getInstances(new Service(namespace, serviceName));
+    }
+
+    @Override
+    public List<String> getAllServices() {
+        return serviceDiscoveryClient.getAllServices();
+    }
+
+    @Override
     public RpcContext beforeServerInvoke(Request request,
                                          AbstractRequestMetaUtils headerUtils) {
         //重置上下文
@@ -328,5 +335,10 @@ public class CommonExtensionLayer implements IExtensionLayer {
                 meterRegistry.buildTags(request, response, rpcContext, statusCode)))
                 .record(System.currentTimeMillis() - rpcContext.getTracingContext().getStartTime(),
                         TimeUnit.MILLISECONDS);
+    }
+
+    @Override
+    public Context getCommonContext() {
+        return commonContext;
     }
 }

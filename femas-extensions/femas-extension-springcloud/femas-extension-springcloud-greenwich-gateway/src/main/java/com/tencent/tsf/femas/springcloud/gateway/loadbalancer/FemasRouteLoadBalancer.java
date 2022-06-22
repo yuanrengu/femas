@@ -17,14 +17,19 @@
 
 package com.tencent.tsf.femas.springcloud.gateway.loadbalancer;
 
+import com.alibaba.cloud.nacos.NacosServiceInstance;
 import com.tencent.tsf.femas.api.ExtensionManager;
 import com.tencent.tsf.femas.api.IExtensionLayer;
 import com.tencent.tsf.femas.common.context.Context;
+import com.tencent.tsf.femas.common.context.ContextConstant;
 import com.tencent.tsf.femas.common.context.FemasContext;
 import com.tencent.tsf.femas.common.context.factory.ContextFactory;
+import com.tencent.tsf.femas.common.entity.EndpointStatus;
 import com.tencent.tsf.femas.common.entity.Service;
+import com.tencent.tsf.femas.common.util.StringUtils;
 import com.tencent.tsf.femas.springcloud.gateway.discovery.DiscoveryServerConverter;
 import com.tencent.tsf.femas.springcloud.gateway.filter.GatewayHeaderUtils;
+import org.apache.commons.collections.CollectionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
@@ -41,6 +46,7 @@ import reactor.core.publisher.Mono;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * A Femas-LoadBalancer-based implementation of {@link ReactorServiceInstanceLoadBalancer}.
@@ -56,6 +62,8 @@ public class FemasRouteLoadBalancer implements ReactorServiceInstanceLoadBalance
     ObjectProvider<ServiceInstanceListSupplier> serviceInstanceListSupplierProvider;
     private IExtensionLayer extensionLayer = ExtensionManager.getExtensionLayer();
     private volatile Context commonContext = ContextFactory.getContextInstance();
+
+    private volatile ContextConstant contextConstant = ContextFactory.getContextConstantInstance();
 
     /**
      * @param serviceInstanceListSupplierProvider a provider of
@@ -95,7 +103,7 @@ public class FemasRouteLoadBalancer implements ReactorServiceInstanceLoadBalance
     }
 
     private Response<ServiceInstance> getInstanceResponse(List<ServiceInstance> instances) {
-        if (instances.isEmpty()) {
+        if (CollectionUtils.isEmpty(instances)) {
             if (log.isWarnEnabled()) {
                 log.warn("No servers available for service: " + serviceId);
             }
@@ -126,7 +134,8 @@ public class FemasRouteLoadBalancer implements ReactorServiceInstanceLoadBalance
     }
 
     private com.tencent.tsf.femas.common.entity.Request getFemasRequest(final List<ServiceInstance> instances, ServerHttpRequest serverHttpRequest) {
-        com.tencent.tsf.femas.common.entity.ServiceInstance serviceInstance = converter.convert(instances.get(0));
+        ServiceInstance femasInstance = getFemasInstanceIfPresent(instances);
+        com.tencent.tsf.femas.common.entity.ServiceInstance serviceInstance = converter.convert(femasInstance);
         com.tencent.tsf.femas.common.entity.Request femasRequest = new com.tencent.tsf.femas.common.entity.Request();
         String serviceName = null;
         if (serviceInstance != null && serviceInstance.getService() != null) {
@@ -144,6 +153,30 @@ public class FemasRouteLoadBalancer implements ReactorServiceInstanceLoadBalance
 
         Context.getRpcInfo().setRequest(femasRequest);
         return femasRequest;
+    }
+
+    /**
+     * 针对不是所有实例接入Femas的场景，优先选择Femas实例
+     */
+    private ServiceInstance getFemasInstanceIfPresent(final List<ServiceInstance> instances){
+        if(instances.size()==1){
+            return instances.get(0);
+        }
+        if(!(instances.get(0) instanceof NacosServiceInstance)){
+            return instances.get(0);
+        }
+
+        for(ServiceInstance server:instances){
+            NacosServiceInstance nacosServer = (NacosServiceInstance) server;
+            if (nacosServer.getMetadata() != null) {
+                Map<String, String> meta = nacosServer.getMetadata();
+                String nameSpace = meta.get(contextConstant.getMetaNamespaceIdKey());
+                if(StringUtils.isNotBlank(nameSpace)){
+                    return server;
+                }
+            }
+        }
+        return instances.get(0);
     }
 
 }

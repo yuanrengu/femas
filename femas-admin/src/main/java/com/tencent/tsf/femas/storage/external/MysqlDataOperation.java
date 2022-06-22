@@ -101,11 +101,14 @@ public class MysqlDataOperation implements DataOperation {
         int res = 0;
         if(StringUtils.isEmpty(registryConfig.getRegistryId())){
             registryConfig.setRegistryId(REGISTRY_ID_PREFIX.concat(iidGeneratorService.nextHashId()));
-            res = manager.update("insert into registry_config(registry_id,registry_cluster,registry_name,registry_type) values(?,?,?,?)",
+            res = manager.update("insert into registry_config(registry_id,registry_cluster,registry_name,registry_type,user_name,password) values(?,?,?,?,?,?)",
                         registryConfig.getRegistryId(),
                         registryConfig.getRegistryCluster(),
                         registryConfig.getRegistryName(),
-                        registryConfig.getRegistryType());
+                        registryConfig.getRegistryType(),
+                        registryConfig.getUsername(),
+                        registryConfig.getPassword()
+            );
         }else{
             res = manager.update("update registry_config set registry_cluster=?,registry_name=? where registry_id=?",
                         registryConfig.getRegistryCluster(),
@@ -200,7 +203,7 @@ public class MysqlDataOperation implements DataOperation {
         if(!CollectionUtil.isEmpty(namespace.getRegistryId())){
             RegistryConfig config = fetchRegistryById(namespace.getRegistryId().get(0));
             RegistryOpenApiInterface registryOpenApiInterface = factory.select(config.getRegistryType());
-            registryOpenApiInterface.createNamespace(config, namespace);
+            registryOpenApiInterface.modifyNamespace(config, namespace);
         }
         return res;
     }
@@ -269,6 +272,10 @@ public class MysqlDataOperation implements DataOperation {
         }
         String[] addresses = registryAddress.split(",");
         for(RegistryConfig config : registryConfigs){
+            //获取注册中心信息
+            RegistryOpenApiInterface registryOpenApiInterface = factory.select(config.getRegistryType());
+            List<Namespace> namespaces = registryOpenApiInterface.allNamespaces(config);
+            Namespace remoteNamespace = namespaces.stream().filter(namespace -> namespace.getNamespaceId().equals(namespaceId)).findFirst().orElse(null);
             for(String address : addresses){
                 // 对 localhost 进行转换
                 String registryCluster = config.getRegistryCluster();
@@ -279,10 +286,18 @@ public class MysqlDataOperation implements DataOperation {
                     address = address.replace("localhost", "127.0.0.1");
                 }
                 if(registryCluster.contains(address)){
+                    Namespace namespace = new Namespace();
+                    namespace.setNamespaceId(namespaceId);
+                    String namespaceName =DEFAULT_NAME;
+                    if(remoteNamespace!=null){
+                        namespaceName =StringUtils.isBlank(remoteNamespace.getName())?namespaceId: remoteNamespace.getName();
+                    }
+                    namespace.setName(namespaceName);
                     ArrayList<String> registryId = new ArrayList<>();
                     registryId.add(config.getRegistryId());
-                    manager.update("insert into namespace(namespace_id,registry_id,namespace.name,namespace.desc) values(?,?,?,?)",
-                            namespaceId, JSONSerializer.serializeStr(registryId) , DEFAULT_NAME, DEFAULT_DESC);
+                    namespace.setRegistryId(registryId);
+                    namespace.setDesc(DEFAULT_DESC);
+                    createNamespace(namespace);
                     return;
                 }
             }
